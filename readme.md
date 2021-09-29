@@ -55,3 +55,6 @@ Restarting into a new level causes first person weapons to not render.
 
 **Q**: How do I know what code you've changed?
 **A**: Apart from the Git diffs, you can look for `// jmarshall` or  `// RB` in the source code.
+
+## suppporting basepath and devpath for dx12 shader compile
++set fs_basepath "E:\SteamLibrary\steamapps\common\Quake 3 Arena" +set fs_devPath "D:\RBQUAKE-3-RTX" 

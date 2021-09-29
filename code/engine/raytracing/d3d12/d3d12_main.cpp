@@ -93,7 +93,109 @@ void GL_WaitForPreviousFrame( void )
 	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 }
 
+
+void GL_EnableDebugLayer()
+
+{
+#if defined( _DEBUG )
+
+	// Always enable the debug layer before doing anything DX12 related
+	// so all possible errors generated while creating DX12 objects
+	// are caught by the debug layer.
+	// Enabling the debug layer after device creation will invalidate the active device.
+
+	ComPtr< ID3D12Debug > debugInterface;
+
+	ThrowIfFailed( D3D12GetDebugInterface( IID_PPV_ARGS( &debugInterface ) ) );
+
+	debugInterface->EnableDebugLayer();
+
+	#if defined( _DEBUG )
+		// Enable the debug layer (requires the Graphics Tools "optional feature").
+		// NOTE: 
+		//{
+		//	ComPtr<ID3D12Debug> debugController;
+		//	if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+		//	{
+		//		debugController->EnableDebugLayer();
+		//
+		//		// Enable additional debug layers.
+		//		dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+		//	}
+		//}
+	#endif
+
+
+#endif
+}
 /*
+===============
+GL_CompileShaderLibrary
+===============
+*/
+inline IDxcBlob* GL_CompileShaderLibrary( std::string fileName )
+{
+
+	static IDxcCompiler*       pCompiler = nullptr;
+	static IDxcLibrary*        pLibrary  = nullptr;
+	static IDxcIncludeHandler* dxcIncludeHandler;
+
+	HRESULT hr;
+
+	// Initialize the DXC compiler and compiler helper
+	if( !pCompiler )
+	{
+		ThrowIfFailed( DxcCreateInstance( CLSID_DxcCompiler, __uuidof( IDxcCompiler ), ( void** )&pCompiler ) );
+		ThrowIfFailed( DxcCreateInstance( CLSID_DxcLibrary, __uuidof( IDxcLibrary ), ( void** )&pLibrary ) );
+		ThrowIfFailed( pLibrary->CreateIncludeHandler( &dxcIncludeHandler ) );
+	}
+	// Open and read the file
+
+	if( !FS_ReadFile( fileName.c_str(),NULL) )
+	{
+		throw std::logic_error( "Cannot find shader file" );
+	}
+	char * sShader;
+	int  len = FS_ReadFile( fileName.c_str(), ( void** )&sShader );
+
+	// Create blob from the string
+	IDxcBlobEncoding* pTextBlob;
+	ThrowIfFailed( pLibrary->CreateBlobWithEncodingFromPinned(
+		( LPBYTE )sShader, ( uint32_t )sShader, 0, &pTextBlob ) );
+	std::wstring wFileName( fileName.begin(), fileName.end() );
+	// Compile
+	IDxcOperationResult* pResult;
+	ThrowIfFailed( pCompiler->Compile( pTextBlob, wFileName.c_str(), L"", L"lib_6_3", nullptr, 0, nullptr, 0, dxcIncludeHandler, &pResult ) );
+
+	// Verify the result
+	HRESULT resultCode;
+	ThrowIfFailed( pResult->GetStatus( &resultCode ) );
+	if( FAILED( resultCode ) )
+	{
+		IDxcBlobEncoding* pError;
+		hr = pResult->GetErrorBuffer( &pError );
+		if( FAILED( hr ) )
+		{
+			throw std::logic_error( "Failed to get shader compiler error" );
+		}
+
+		// Convert error blob to a string
+		std::vector< char > infoLog( pError->GetBufferSize() + 1 );
+		memcpy( infoLog.data(), pError->GetBufferPointer(), pError->GetBufferSize() );
+		infoLog[ pError->GetBufferSize() ] = 0;
+
+		std::string errorMsg = "Shader Compiler Error:\n";
+		errorMsg.append( infoLog.data() );
+
+		MessageBoxA( nullptr, errorMsg.c_str(), "Error!", MB_OK );
+		throw std::logic_error( "Failed compile shader" );
+	}
+
+	IDxcBlob* pBlob;
+	ThrowIfFailed( pResult->GetResult( &pBlob ) );
+	return pBlob;
+}
+	/*
 ===============
 GL_InitRaytracing
 ===============
@@ -167,15 +269,16 @@ void GL_InitRaytracing( int width, int height )
 	// set of DXIL libraries. We chose to separate the code in several libraries
 	// by semantic (ray generation, hit, miss) for clarity. Any code layout can be
 	// used.
-	m_rayGenLibrary = nv_helpers_dx12::CompileShaderLibrary( L"baseq3/shaders/RayGen.hlsl" );
-	m_missLibrary   = nv_helpers_dx12::CompileShaderLibrary( L"baseq3/shaders/Miss.hlsl" );
-	m_hitLibrary    = nv_helpers_dx12::CompileShaderLibrary( L"baseq3/shaders/Hit.hlsl" );
-	m_anyHitLibrary = nv_helpers_dx12::CompileShaderLibrary( L"baseq3/shaders/AnyHit.hlsl" );
+
+	m_rayGenLibrary = GL_CompileShaderLibrary( "baseq3/shaders/RayGen.hlsl" );
+	m_missLibrary   = GL_CompileShaderLibrary( "baseq3/shaders/Miss.hlsl" );
+	m_hitLibrary    = GL_CompileShaderLibrary( "baseq3/shaders/Hit.hlsl" );
+	m_anyHitLibrary = GL_CompileShaderLibrary( "baseq3/shaders/AnyHit.hlsl" );
 	// #DXR Extra - Another ray type
-	m_shadowLibrary = nv_helpers_dx12::CompileShaderLibrary( L"baseq3/shaders/ShadowRay.hlsl" );
+	m_shadowLibrary = GL_CompileShaderLibrary( "baseq3/shaders/ShadowRay.hlsl" );
 	pipeline.AddLibrary( m_shadowLibrary.Get(), { L"ShadowClosestHit", L"ShadowMiss" } );
 
-	m_secondHitLibrary = nv_helpers_dx12::CompileShaderLibrary( L"baseq3/shaders/HitSecond.hlsl" );
+	m_secondHitLibrary = GL_CompileShaderLibrary( "baseq3/shaders/HitSecond.hlsl" );
 	pipeline.AddLibrary( m_secondHitLibrary.Get(), { L"SecondClosestHit", L"SecondMiss" } );
 
 	// In a way similar to DLLs, each library is associated with a number of
@@ -375,21 +478,7 @@ void GL_Init( HWND hwnd, HINSTANCE hinstance, int width, int height )
 
 	Com_Printf( "------ GL_Init -------\n" );
 
-#if defined( _DEBUG )
-	// Enable the debug layer (requires the Graphics Tools "optional feature").
-	// NOTE: Enabling the debug layer after device creation will invalidate the active device.
-	//{
-	//	ComPtr<ID3D12Debug> debugController;
-	//	if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
-	//	{
-	//		debugController->EnableDebugLayer();
-	//
-	//		// Enable additional debug layers.
-	//		dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-	//	}
-	//}
-#endif
-
+	GL_EnableDebugLayer();
 	ComPtr< IDXGIFactory4 > factory;
 	ThrowIfFailed( CreateDXGIFactory2( dxgiFactoryFlags, IID_PPV_ARGS( &factory ) ) );
 

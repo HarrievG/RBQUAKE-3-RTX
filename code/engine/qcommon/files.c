@@ -251,6 +251,7 @@ typedef struct searchpath_s
 
 static char          fs_gamedir[ MAX_OSPATH ]; // this will be a single file name with no separators
 static cvar_t*       fs_debug;
+static cvar_t*       fs_devpath; // like d3
 static cvar_t*       fs_homepath;
 static cvar_t*       fs_basepath;
 static cvar_t*       fs_basegame;
@@ -3067,7 +3068,9 @@ static void FS_Startup( const char* gameName )
 	fs_copyfiles = Cvar_Get( "fs_copyfiles", "0", CVAR_INIT );
 	fs_cdpath    = Cvar_Get( "fs_cdpath", Sys_DefaultCDPath(), CVAR_INIT );
 	fs_basepath  = Cvar_Get( "fs_basepath", Sys_DefaultInstallPath(), CVAR_INIT );
+	fs_devpath   = Cvar_Get( "fs_devpath", "", CVAR_INIT );
 	fs_basegame  = Cvar_Get( "fs_basegame", "", CVAR_INIT );
+
 	homePath     = Sys_DefaultHomePath();
 	if( !homePath || !homePath[ 0 ] )
 	{
@@ -3086,11 +3089,15 @@ static void FS_Startup( const char* gameName )
 	{
 		FS_AddGameDirectory( fs_basepath->string, gameName );
 	}
+	if( fs_devpath->string[ 0 ] )
+	{
+		FS_AddGameDirectory( fs_devpath->string, gameName );
+	}
 	// fs_homepath is somewhat particular to *nix systems, only add if relevant
 	// NOTE: same filtering below for mods and basegame
 	if( fs_basepath->string[ 0 ] && Q_stricmp( fs_homepath->string, fs_basepath->string ) )
 	{
-		FS_AddGameDirectory( fs_homepath->string, gameName );
+		FS_AddGameDirectory( fs_homepath->string, "" ); // raw path
 	}
 
 	// check for additional base game so mods can be based upon other mods
